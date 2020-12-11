@@ -116,7 +116,7 @@ parser.add_argument("--seed", type=int, default=31, help="seed")
 def main():
     global args
     args = parser.parse_args()
-    init_distributed_mode(args)
+#     init_distributed_mode(args)
     fix_random_seeds(args.seed)
     logger, training_stats = initialize_exp(args, "epoch", "loss")
 
@@ -129,11 +129,12 @@ def main():
         args.max_scale_crops,
         return_index=True,
         pil_blur=args.use_pil_blur,
+        split='train'
     )
-    sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
+#     sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
     train_loader = torch.utils.data.DataLoader(
         train_dataset,
-        sampler=sampler,
+#         sampler=sampler,
         batch_size=args.batch_size,
         num_workers=args.workers,
         pin_memory=True,
@@ -149,13 +150,13 @@ def main():
         nmb_prototypes=args.nmb_prototypes,
     )
     # synchronize batch norm layers
-    if args.sync_bn == "pytorch":
-        model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
-    elif args.sync_bn == "apex":
-        # with apex syncbn we sync bn per group because it speeds up computation
-        # compared to global syncbn
-        process_group = apex.parallel.create_syncbn_process_group(args.syncbn_process_group_size)
-        model = apex.parallel.convert_syncbn_model(model, process_group=process_group)
+#     if args.sync_bn == "pytorch":
+#         model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
+#     elif args.sync_bn == "apex":
+#         # with apex syncbn we sync bn per group because it speeds up computation
+#         # compared to global syncbn
+#         process_group = apex.parallel.create_syncbn_process_group(args.syncbn_process_group_size)
+#         model = apex.parallel.convert_syncbn_model(model, process_group=process_group)
     # copy model to GPU
     model = model.cuda()
     if args.rank == 0:
@@ -178,11 +179,11 @@ def main():
     logger.info("Building optimizer done.")
 
     # wrap model
-    model = nn.parallel.DistributedDataParallel(
-        model,
-        device_ids=[args.gpu_to_work_on],
-        find_unused_parameters=True,
-    )
+#     model = nn.parallel.DistributedDataParallel(
+#         model,
+#         device_ids=[args.gpu_to_work_on],
+#         find_unused_parameters=True,
+#     )
 
     # optionally resume from a checkpoint
     to_restore = {"epoch": 0}
@@ -210,7 +211,7 @@ def main():
         logger.info("============ Starting epoch %i ... ============" % epoch)
 
         # set sampler
-        train_loader.sampler.set_epoch(epoch)
+#         train_loader.sampler.set_epoch(epoch)
 
         # train the network
         scores, local_memory_index, local_memory_embeddings = train(
@@ -358,7 +359,7 @@ def cluster_memory(model, local_memory_index, local_memory_embeddings, size_data
                 random_idx = torch.randperm(len(local_memory_embeddings[j]))[:K]
                 assert len(random_idx) >= K, "please reduce the number of centroids"
                 centroids = local_memory_embeddings[j][random_idx]
-            dist.broadcast(centroids, 0)
+#             dist.broadcast(centroids, 0)
 
             for n_iter in range(nmb_kmeans_iters + 1):
 
@@ -381,31 +382,31 @@ def cluster_memory(model, local_memory_index, local_memory_embeddings, size_data
                             dim=0,
                         )
                         counts[k] = len(where_helper[k][0])
-                dist.all_reduce(counts)
+#                 dist.all_reduce(counts)
                 mask = counts > 0
-                dist.all_reduce(emb_sums)
+#                 dist.all_reduce(emb_sums)
                 centroids[mask] = emb_sums[mask] / counts[mask].unsqueeze(1)
 
                 # normalize centroids
                 centroids = nn.functional.normalize(centroids, dim=1, p=2)
 
-            getattr(model.module.prototypes, "prototypes" + str(i_K)).weight.copy_(centroids)
+            getattr(model.prototypes, "prototypes" + str(i_K)).weight.copy_(centroids)
 
             # gather the assignments
-            assignments_all = torch.empty(args.world_size, local_assignments.size(0),
-                                          dtype=local_assignments.dtype, device=local_assignments.device)
-            assignments_all = list(assignments_all.unbind(0))
-            dist_process = dist.all_gather(assignments_all, local_assignments, async_op=True)
-            dist_process.wait()
-            assignments_all = torch.cat(assignments_all).cpu()
+#             assignments_all = torch.empty(args.world_size, local_assignments.size(0),
+#                                           dtype=local_assignments.dtype, device=local_assignments.device)
+#             assignments_all = list(assignments_all.unbind(0))
+#             dist_process = dist.all_gather(assignments_all, local_assignments, async_op=True)
+#             dist_process.wait()
+            assignments_all = local_assignments.cpu() #torch.cat(assignments_all).cpu()
 
             # gather the indexes
-            indexes_all = torch.empty(args.world_size, local_memory_index.size(0),
-                                      dtype=local_memory_index.dtype, device=local_memory_index.device)
-            indexes_all = list(indexes_all.unbind(0))
-            dist_process = dist.all_gather(indexes_all, local_memory_index, async_op=True)
-            dist_process.wait()
-            indexes_all = torch.cat(indexes_all).cpu()
+#             indexes_all = torch.empty(args.world_size, local_memory_index.size(0),
+#                                       dtype=local_memory_index.dtype, device=local_memory_index.device)
+#             indexes_all = list(indexes_all.unbind(0))
+#             dist_process = dist.all_gather(indexes_all, local_memory_index, async_op=True)
+#             dist_process.wait()
+            indexes_all = local_memory_index.cpu() #torch.cat(indexes_all).cpu()
 
             # log assignments
             assignments[i_K][indexes_all] = assignments_all
